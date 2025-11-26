@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sangkan Paraning Bebrayan | Tanah Air dari Air Mata Kami</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts for Epic/Poetic Typography -->
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,700;1,400&display=swap" rel="stylesheet">
+    <!-- Firebase SDKs for Firestore and Auth -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Variabel Global dari Lingkungan Canvas
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+
+        let db, auth;
+        let userId = null; 
+        let isAuthReady = false;
+
+        // Inisialisasi Firebase
+        const setupFirebase = async () => {
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                // Cek Perubahan Status Otentikasi
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                    } else {
+                        // Jika token tersedia, gunakan custom token, jika tidak, sign in anonim
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                        userId = auth.currentUser?.uid || 'anonymous-user';
+                    }
+                    isAuthReady = true;
+                    console.log("Firebase Auth Ready. User ID:", userId);
+                    setupCommentsListener(); // Mulai mendengarkan komentar setelah auth siap
+                });
+
+            } catch (e) {
+                console.error("Firebase setup failed:", e);
+            }
+        };
+
+        const getCommentsCollectionRef = () => {
+            // Path Public: /artifacts/{appId}/public/data/comments
+            return collection(db, `artifacts/${appId}/public/data/comments`);
+        };
+
+        const setupCommentsListener = () => {
+            if (!isAuthReady) return;
+
+            const commentsContainer = document.getElementById('comments-container');
+            if (!commentsContainer) return;
+
+            // Query: Ambil data, urutkan (di client side, karena orderBy rawan error index)
+            const q = query(getCommentsCollectionRef());
+
+            onSnapshot(q, (snapshot) => {
+                let comments = [];
+                snapshot.forEach(doc => {
+                    comments.push({ id: doc.id, ...doc.data() });
+                });
+
+                // Sort data in memory (by timestamp descending)
+                comments.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+
+                commentsContainer.innerHTML = '';
+                
+                if (comments.length === 0) {
+                    commentsContainer.innerHTML = `<p class="text-center text-gray-500 py-4 italic">Belum ada konfirmasi kehadiran. Jadilah yang pertama!</p>`;
+                } else {
+                    comments.forEach(comment => {
+                        const date = comment.timestamp ? new Date(comment.timestamp.seconds * 1000).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : 'Baru saja';
+                        const commentElement = document.createElement('div');
+                        commentElement.className = 'p-3 bg-white/5 rounded-lg mb-3 shadow-md border-l-4 border-var(--color-light-blue-1)';
+                        commentElement.innerHTML = `
+                            <div class="font-bold text-var(--color-silver) flex justify-between items-center">
+                                <span>${comment.name || 'Anonim'}</span>
+                                <span class="text-xs font-light text-gray-500">${date}</span>
+                            </div>
+                            <p class="mt-1 text-sm">${comment.message}</p>
+                        `;
+                        commentsContainer.appendChild(commentElement);
+                    });
+                }
+            }, (error) => {
+                console.error("Error fetching comments:", error);
+            });
+        };
+
+        window.addComment = async (event) => {
+            event.preventDefault();
+            if (!isAuthReady || !db) {
+                console.error("Sistem belum siap. Coba lagi.");
+                alert("Sistem belum siap. Coba lagi."); // Menggunakan alert sementara untuk notifikasi user
+                return;
+            }
+
+            const nameInput = document.getElementById('comment-name');
+            const messageInput = document.getElementById('comment-message');
+            
+            const name = nameInput.value.trim();
+            const message = messageInput.value.trim();
+
+            if (!name || !message) {
+                alert("Nama dan Pesan wajib diisi.");
+                return;
+            }
+
+            try {
+                await addDoc(getCommentsCollectionRef(), {
+                    name: name,
+                    message: message,
+                    timestamp: serverTimestamp(),
+                    userId: userId,
+                    appId: appId
+                });
+                
+                nameInput.value = '';
+                messageInput.value = '';
+                alert("Konfirmasi terkirim! Pesan Anda akan muncul.");
+            } catch (e) {
+                console.error("Error menambahkan pesan: ", e);
+                alert("Gagal mengirim konfirmasi. Periksa koneksi Anda.");
+            }
+        };
+
+        // Pasang setup Firebase ke window load/DOMContentLoaded
+        window.addEventListener('DOMContentLoaded', setupFirebase);
+    </script>
+    <style>
+        /* CSS Kustom & Variabel Warna */
+        :root {
+            --color-light-blue-1: #A6D8F5; 
+            --color-light-blue-2: #D8F0FF; 
+            --color-silver: #C5C7D0;
+            --color-dark-blue: #1A237E;
+            --shadow-neon-blue: 0 0 15px rgba(166, 216, 245, 0.8);
+            --text-dark: #111827; /* Warna teks pada mode terang */
+        }
+
+        /* 1. Background & Base Styling (DEFAULT: DARK MODE / Panggung Malam) */
+        body {
+            background-color: var(--color-dark-blue); 
+            background: linear-gradient(180deg, var(--color-dark-blue) 0%, #0D1336 100%);
+            color: white;
+            font-family: 'Cormorant Garamond', serif;
+            scroll-behavior: smooth;
+            /* Awalnya disembunyikan untuk menunggu klik Welcome Screen */
+            overflow-x: hidden;
+            overflow-y: hidden;
+            transition: background 1s ease-in-out, color 1s ease-in-out;
+        }
+
+        /* 2. Cinematic & Ethereal Stage Effects */
+        .cinematic-stage {
+            position: relative;
+            min-height: 100vh;
+            perspective: 1000px; 
+        }
+
+        /* Animasi Kabut / Partikel */
+        .fog-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at 50% 50%, rgba(166, 216, 245, 0.15) 0%, transparent 70%);
+            animation: slow-drift 40s infinite alternate ease-in-out;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        @keyframes slow-drift {
+            0% { transform: translate3d(0, 0, 0); }
+            100% { transform: translate3d(50px, -20px, 0); }
+        }
+
+        /* 3. Typography & Glow (Dark Mode) */
+        .epic-title {
+            font-family: 'Cinzel', serif;
+            text-shadow: 0 0 10px rgba(197, 199, 208, 0.6), var(--shadow-neon-blue);
+            color: var(--color-silver);
+            animation: glow 3s infinite alternate;
+            transition: color 1s, text-shadow 1s;
+        }
+
+        @keyframes glow {
+            0% { text-shadow: 0 0 10px var(--color-silver), var(--shadow-neon-blue); }
+            100% { text-shadow: 0 0 20px var(--color-light-blue-1), 0 0 30px var(--color-silver); }
+        }
+
+        /* 4. Glassmorphism & Floating Elements (Dark Mode) */
+        .glass-card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(197, 199, 208, 0.3);
+            border-radius: 12px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            transition: all 0.5s;
+        }
+
+        .glass-card:hover {
+            box-shadow: 0 0 25px rgba(166, 216, 245, 0.5);
+            transform: translateY(-5px);
+        }
+        
+        /* 5. Sticky Header */
+        .sticky-header {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            z-index: 50;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            background: rgba(27, 27, 54, 0.8); 
+            transition: transform 0.3s ease-out;
+            transform: translateY(-100%);
+        }
+        .sticky-header.visible {
+            transform: translateY(0);
+        }
+
+        /* 8. WELCOME SCREEN */
+        #welcome-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(180deg, var(--color-dark-blue) 0%, #0D1336 100%);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            opacity: 1;
+            transition: opacity 0.5s ease-out; /* Kurangi durasi transisi */
+        }
+        .welcome-card {
+            border: 2px solid var(--color-silver);
+            padding: 40px 60px;
+            border-radius: 12px;
+            box-shadow: 0 0 50px rgba(166, 216, 245, 0.6);
+            background: rgba(255, 255, 255, 0.05);
+            max-width: 700px;
+        }
+        .welcome-title {
+            font-family: 'Cinzel', serif;
+            font-size: 2.5rem;
+            color: var(--color-silver);
+            text-shadow: var(--shadow-neon-blue);
+        }
+        .welcome-body {
+            font-size: 1.1rem;
+            color: #ccc;
+            line-height: 1.8;
+        }
+
+        /* 9. LOADING TRANSITION - DIHAPUS, hanya sebagai placeholder */
+        #loading-transition {
+            display: none !important; 
+        }
+        
+
+        /* 10. Light Mode / Stage Lighting Effect (Panggung Terang) */
+        body.light-mode {
+            background-color: var(--color-light-blue-2);
+            background: linear-gradient(180deg, var(--color-light-blue-2) 0%, var(--color-light-blue-1) 100%);
+            color: var(--text-dark); /* Teks gelap pada latar terang */
+        }
+        
+        body.light-mode .epic-title {
+            color: var(--color-dark-blue); /* Judul menjadi warna biru tua */
+            text-shadow: 0 0 1px rgba(0,0,0,0.1); 
+            animation: none; 
+        }
+
+        body.light-mode .glass-card {
+            background: rgba(255, 255, 255, 0.7); /* Lebih transparan tapi terang */
+            border: 1px solid rgba(197, 199, 208, 0.8);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* Penyesuaian Warna Teks untuk Light Mode */
+        body.light-mode p, body.light-mode a, body.light-mode label, body.light-mode .text-gray-400 {
+            color: var(--text-dark) !important;
+        }
+        
+        body.light-mode .text-white {
+            color: var(--text-dark) !important;
+        }
+
+        body.light-mode .social-icons a {
+            color: var(--color-dark-blue) !important;
+            text-shadow: none;
+        }
+        
+        body.light-mode .cp-info {
+            color: var(--color-dark-blue) !important;
+        }
+
+
+        /* --- STYLING KRU/PEMERAN --- */
+        .crew-list-item {
+            border-bottom: 1px solid rgba(197, 199, 208, 0.2);
+            padding: 15px 0;
+            display: grid;
+            grid-template-columns: 1fr 1fr 2fr; /* Role | Real Name | Stage Name */
+            align-items: center;
+            transition: background-color 0.3s;
+        }
+        .crew-list-item:hover {
+            background-color: rgba(255, 255, 255, 0.03);
+        }
+        .crew-list-item:last-child {
+            border-bottom: none;
+        }
+        .role {
+            font-size: 1.1rem;
+            color: var(--color-light-blue-1);
+        }
+        .real-name strong {
+            font-weight: 700;
+            color: var(--color-silver);
+        }
+        .stage-name {
+            font-family: 'Cinzel', serif;
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: white;
+            text-shadow: 0 0 5px var(--color-light-blue-1);
+        }
+
+        /* --- STYLING SCROLLING TEXT GALLERY --- */
+        .scrolling-text-container {
+            width: 100%;
+            overflow: hidden;
+            white-space: nowrap;
+            padding: 40px 0;
+            background: rgba(255, 255, 255, 0.05);
+            border-top: 2px solid var(--color-silver);
+            border-bottom: 2px solid var(--color-silver);
+        }
+
+        .scrolling-text-content {
+            display: inline-block;
+            animation: marquee 60s linear infinite; /* Kecepatan marquee */
+            font-family: 'Cinzel', serif;
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: white;
+            text-shadow: var(--shadow-neon-blue);
+        }
+
+        @keyframes marquee {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); } /* Geser 50% karena konten diduplikasi */
+        }
+        
+        .scrolling-text-content span {
+            margin: 0 40px;
+            display: inline-block;
+            vertical-align: middle;
+        }
+
+        .logo-placeholder {
+            width: 80px;
+            height: 80px;
+            background: var(--color-silver);
+            border-radius: 50%;
+            line-height: 80px;
+            text-align: center;
+            font-size: 0.8rem;
+            color: var(--color-dark-blue);
+            font-weight: bold;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            margin: 0 20px;
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+        }
+
+        /* --- STYLING KOMENTAR/CHAT --- */
+        .comments-column {
+            height: 500px;
+            overflow-y: auto;
+            /* Styling mirip chat/bulletin board */
+        }
+    </style>
+</head>
+<body>
+    
+    <!-- HALAMAN SAMBUTAN (ENTRY/LOGIN) - Konsep Undangan Formal -->
+    <div id="welcome-screen">
+        <div class="welcome-card text-center">
+            <p class="welcome-body mb-2 italic text-gray-400">Dengan rahmat Tuhan Yang Maha Esa,</p>
+            <p class="welcome-body text-lg mb-4">
+                Kami dengan hormat mengundang kehadiran Bapak/Ibu/Saudara/i sekalian dalam pementasan:<br>
+            </p>
+            
+            <h1 class="welcome-title mb-2">
+                SANGKAN PARANING BEBRAYAN
+            </h1>
+            <p class="text-xl epic-title mb-6">
+                Tanah Air dari Air Mata Kami
+            </p>
+            
+            <p class="welcome-body text-sm mb-8">
+                <span class="text-var(--color-light-blue-1) font-bold">TEATER UNIVERSITAS PUTRA BANGSA</span><br>
+                <span class="text-gray-400">Kolaborasi dengan SMP TAMAN DEWASA KEBUMEN</span>
+            </p>
+            
+            <button id="enter-btn" class="cinematic-play-btn bg-var(--color-light-blue-1) text-var(--color-dark-blue) hover:bg-white text-xl font-serif tracking-widest py-3 px-10 rounded-full transition-all duration-300 ease-in-out shadow-xl">
+                MASUK KE PANGGUNG
+            </button>
+        </div>
+    </div>
+    
+    <!-- LOADING TRANSITION - DIHAPUS (Hanya placeholder div) -->
+    <div id="loading-transition" style="display: none;"></div>
+
+    
+    <!-- HEADER: Minimalist Logo & Navigation -->
+    <header id="main-header" class="sticky-header">
+        <div class="max-w-7xl mx-auto flex justify-between items-center p-4">
+            <!-- Placeholder Logo (Ganti dengan tag <img> atau SVG logo Anda) -->
+            <div class="text-xl font-bold tracking-widest flex items-center">
+                <span class="text-var(--color-silver) text-3xl mr-2">🎭</span>
+                <span class="text-white">Putra Bangsa | SMP TD Kebumen</span>
+            </div>
+            
+            <!-- Minimal Navigation -->
+            <nav class="space-x-4 text-sm font-sans flex items-center">
+                <a href="#prolog" class="hover:text-var(--color-silver) transition duration-200">Prolog</a>
+                <a href="#video" class="hover:text-var(--color-silver) transition duration-200">Trailer</a>
+                <a href="#crew" class="hover:text-var(--color-silver) transition duration-200">Kru</a>
+                <a href="#location" class="hover:text-var(--color-silver) transition duration-200">Lokasi</a>
+                <a href="#comments" class="hover:text-var(--color-silver) transition duration-200">Komentar</a>
+                
+                <!-- TOMBOL GELAP / TERANG -->
+                <button id="theme-toggle-btn" class="text-gray-400 hover:text-var(--color-silver) ml-4 text-lg" title="Ganti Mode Cahaya">
+                    <span id="theme-icon">🔆</span> 
+                </button>
+            </nav>
+        </div>
+    </header>
+
+    <!-- I. HOMEPAGE — OPENING SCENE (Halaman Utama Langsung) -->
+    <section id="homepage" class="cinematic-stage flex items-center justify-center text-center">
+        
+        <!-- Atmospheric Fog / Particles -->
+        <div class="fog-bg"></div>
+
+        <!-- Konten Halaman Utama -->
+        <div class="z-20 p-6 max-w-4xl mx-auto">
+            
+            <!-- Teks Undangan Prominen -->
+            <p class="text-2xl md:text-3xl text-var(--color-silver) mb-8 font-bold tracking-wider">
+                TEATER UNIVERSITAS PUTRA BANGSA<br>
+                <span class="text-xl text-gray-400 font-bold block mt-2">KOLABORASI DENGAN SMP TAMAN DEWASA KEBUMEN</span><br>
+                <span class="text-4xl epic-title block mt-4">MENGUNDANG ANDA</span>
+            </p>
+            
+            <!-- Judul Pementasan Tetap Dramatis -->
+            <h1 class="text-6xl md:text-8xl epic-title mb-4">
+                TANAH AIR DARI<br>AIR MATA KAMI
+            </h1>
+            <p class="text-lg italic text-gray-300 mb-10">SANGKAN PARANING BEBRAYAN</p>
+            
+            <!-- Tombol yang sekarang hanya berfungsi sebagai CTA -->
+            <a href="#prolog" class="cinematic-play-btn bg-white/10 hover:bg-white/20 text-xl text-white font-serif tracking-widest py-3 px-10 rounded-full border border-gray-500 shadow-lg transition-all duration-300 ease-in-out">
+                LIHAT PROLOG
+            </a>
+        </div>
+    </section>
+
+    <!-- II. KONTEN UTAMA -->
+    <main id="main-content" class="pt-20">
+        
+        <!-- SECTION 1: PROLOG NASKAH -->
+        <section id="prolog" class="py-20 bg-black/10 relative overflow-hidden">
+            <div class="fog-bg opacity-50"></div>
+            <div class="max-w-3xl mx-auto p-8 glass-card">
+                <h2 class="text-4xl epic-title mb-6 text-center">PROLOG</h2>
+                <div class="text-lg leading-relaxed text-gray-200">
+                    <p class="mb-4">
+                        Di antara desir angin yang membawa bau tanah basah dan bisikan para leluhur, kita berdiri. Sangkan Paraning Bebrayan, asal dan tujuan dari segala ikatan, kini terukir dalam sebuah kisah yang lahir dari kebekuan hati. Ini adalah riwayat tentang kedaulatan yang dicari, bukan di ufuk yang jauh, melainkan di kedalaman kolam air mata yang tak pernah kering.
+                    </p>
+                    <p>
+                        Panggung ini, yang terbuat dari mimpi dan kenyataan, menanti langkah kaki jiwa-jiwa yang haus akan makna. Sebelum tirai fisik terangkat, dengarkan gumaman dari Tanah Air yang meminta diakui, di mana setiap sungai adalah ratapan dan setiap gunung adalah janji. Selamat datang di babak pertama, di mana yang abstrak menjadi nyata, dan yang nyata hanyalah bayangan.
+                    </p>
+                </div>
+            </div>
+        </section>
+        
+        <!-- SECTION 2 & 3: INVITER & EVENT DETAILS -->
+        <section id="details" class="py-20 bg-black/5">
+            <div class="max-w-5xl mx-auto grid md:grid-cols-2 gap-10 p-8">
+                <!-- Who Invites You - Spotlight Card -->
+                <div class="p-8 text-center bg-transparent border-b-2 border-t-2 border-gray-500 shadow-lg relative overflow-hidden">
+                    <h3 class="text-xl text-gray-400 mb-2">PENGUNDANG & KOLABORATOR</h3>
+                    <p class="text-4xl epic-title">TEATER UNIVERSITAS PUTRA BANGSA</p>
+                    <p class="text-xl text-gray-400 mt-2">Kolaborasi dengan:</p>
+                    <p class="text-3xl epic-title">SMP TAMAN DEWASA KEBUMEN</p>
+                </div>
+
+                <!-- Event Details - Playbill Layout -->
+                <div class="p-8 glass-card">
+                    <h3 class="text-3xl epic-title mb-6 text-center">PLAYBILL: JADWAL PENTAS</h3>
+                    <div class="space-y-4">
+                        <div class="border-b border-gray-700 pb-3">
+                            <span class="text-lg text-gray-400 block">Tanggal</span>
+                            <span class="text-2xl text-white block">Sabtu, 14 Desember 2025</span>
+                        </div>
+                        <div class="border-b border-gray-700 pb-3">
+                            <span class="text-lg text-gray-400 block">Waktu</span>
+                            <span class="text-2xl text-white block">Pukul 19.30 WIB</span>
+                        </div>
+                        <div class="pb-3">
+                            <span class="text-lg text-gray-400 block">Tempat</span>
+                            <span class="text-2xl text-white block">Gedung Kesenian Cak Durasim, Surabaya</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- NEW SECTION: VIDEO TRAILER -->
+        <section id="video" class="py-20 bg-black/10">
+            <h2 class="text-5xl epic-title text-center mb-12">SEKILAS TEASER (TRAILER SINEMATIK)</h2>
+            <div class="max-w-4xl mx-auto p-4">
+                <div class="aspect-w-16 aspect-h-9 glass-card overflow-hidden rounded-xl">
+                    <!-- Ganti ID video di bawah dengan trailer YouTube Anda -->
+                    <iframe 
+                        width="100%" 
+                        height="480" 
+                        src="https://www.youtube.com/embed/dQw4w9WgXcQ" 
+                        title="Teaser Pementasan Tanah Air" 
+                        frameborder="0" 
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                        allowfullscreen
+                        class="w-full h-full"
+                    ></iframe>
+                </div>
+                <p class="text-center text-sm mt-4 text-gray-400">Penting: Audio video ini terpisah dari musik latar.</p>
+            </div>
+        </section>
+
+        <!-- SECTION 4: CAST & CREW (List Style) -->
+        <section id="crew" class="py-20 bg-black/5">
+            <h2 class="text-5xl epic-title text-center mb-12">KRU & PEMERAN</h2>
+            <div class="max-w-5xl mx-auto p-8 glass-card">
+                <!-- Header List -->
+                <div class="crew-list-item font-bold text-lg text-var(--color-light-blue-1)">
+                    <p class="role">Peran</p>
+                    <p class="real-name">Nama Asli</p>
+                    <p class="stage-name">Nama Panggung</p>
+                </div>
+                <!-- Data Kru Fiktif -->
+                <div class="crew-list-item">
+                    <p class="role">Sutradara</p>
+                    <p class="real-name"><strong>Arjuna Wiratama</strong></p>
+                    <p class="stage-name"><strong>PANGGUNG ARJUNA</strong></p>
+                </div>
+                <div class="crew-list-item">
+                    <p class="role">Penulis Naskah</p>
+                    <p class="real-name"><strong>Saraswati Dewi</strong></p>
+                    <p class="stage-name"><strong>PUSTAKA DEWI</strong></p>
+                </div>
+                <div class="crew-list-item">
+                    <p class="role">Pemeran Utama (Kanda)</p>
+                    <p class="real-name"><strong>Bima Sakti</strong></p>
+                    <p class="stage-name"><strong>BHIMA KALA</strong></p>
+                </div>
+                <div class="crew-list-item">
+                    <p class="role">Pemeran Utama (Adinda)</p>
+                    <p class="real-name"><strong>Rani Candra</strong></p>
+                    <p class="stage-name"><strong>LARA JINGGA</strong></p>
+                </div>
+                <div class="crew-list-item">
+                    <p class="role">Penata Cahaya</p>
+                    <p class="real-name"><strong>Gatot Kaca</strong></p>
+                    <p class="stage-name"><strong>SINAR TEJA</strong></p>
+                </div>
+                <div class="crew-list-item">
+                    <p class="role">Penata Musik</p>
+                    <p class="real-name"><strong>Larasati</strong></p>
+                    <p class="stage-name"><strong>GENDHING BUANA</strong></p>
+                </div>
+            </div>
+        </section>
+
+        <!-- NEW SECTION: LOKASI (GOOGLE MAPS) -->
+        <section id="location" class="py-20 bg-black/10">
+            <h2 class="text-5xl epic-title text-center mb-12">LOKASI PEMENTASAN</h2>
+            <div class="max-w-4xl mx-auto p-4 glass-card">
+                <p class="text-center text-lg mb-4 text-gray-300">Gedung Kesenian Cak Durasim, Surabaya</p>
+                <div class="aspect-w-16 aspect-h-9 overflow-hidden rounded-xl">
+                    <!-- Ganti koordinat latitude dan longitude di bawah ini dengan lokasi yang sebenarnya -->
+                    <iframe 
+                        src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3957.502284987625!2d112.730337!3d-7.291789!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x2dd7fbdf8369165b%3A0xc3911c05d7b5b57!2sGedung%20Kesenian%20Cak%20Durasim!5e0!3m2!1sen!2sid!4v1678886400000!5m2!1sen!2sid" 
+                        width="100%" 
+                        height="450" 
+                        style="border:0;" 
+                        allowfullscreen="" 
+                        loading="lazy" 
+                        referrerpolicy="no-referrer-when-downgrade"
+                        class="w-full h-full"
+                    ></iframe>
+                </div>
+                <a href="https://maps.app.goo.gl/XXXXXXX" target="_blank" class="mt-4 block text-center text-var(--color-light-blue-1) hover:text-var(--color-silver) transition duration-200">
+                    Lihat di Google Maps
+                </a>
+            </div>
+        </section>
+
+        <!-- SECTION 6: KOMENTAR KEHADIRAN (Real-time Chat/Comments) -->
+        <section id="comments" class="py-20 bg-black/5">
+            <h2 class="text-5xl epic-title text-center mb-12">KONFIRMASI & PESAN DUKUNGAN</h2>
+            <div class="max-w-xl mx-auto p-8 glass-card">
+                <!-- Kolom Komentar Yang Ditampilkan -->
+                <div id="comments-container" class="comments-column mb-8 border border-gray-700 p-4 rounded-xl shadow-inner bg-black/10">
+                    <!-- Komentar akan dimuat di sini oleh JavaScript (onSnapshot) -->
+                    <p class="text-center text-gray-500 italic">Memuat pesan...</p>
+                </div>
+                
+                <!-- Form Input Komentar -->
+                <form onsubmit="window.addComment(event)" class="space-y-4">
+                    <div class="mb-2">
+                        <label for="comment-name" class="block text-sm font-medium text-gray-400 mb-1">Nama Anda</label>
+                        <input type="text" id="comment-name" required class="w-full p-3 rounded bg-white/10 border border-gray-600 text-white transition duration-300" placeholder="Nama untuk ditampilkan">
+                    </div>
+                    <div class="mb-4">
+                        <label for="comment-message" class="block text-sm font-medium text-gray-400 mb-1">Pesan Kehadiran / Dukungan</label>
+                        <textarea id="comment-message" rows="2" required class="w-full p-3 rounded bg-white/10 border border-gray-600 text-white transition duration-300" placeholder="Contoh: Saya hadir bersama 2 orang! Sukses pementasannya."></textarea>
+                    </div>
+                    
+                    <button type="submit" class="w-full py-3 text-lg bg-var(--color-light-blue-1) text-var(--color-dark-blue) font-bold rounded-lg shadow-lg hover:shadow-2xl hover:bg-white transition-all duration-300 spotlight-submit-effect">
+                        KIRIM PESAN (Konfirmasi Kehadiran)
+                    </button>
+                </form>
+            </div>
+        </section>
+    </main>
+    
+    <!-- FOOTER — ABSTRACT THEATER ENDING & KONTAK -->
+    <footer id="footer-contact" class="py-16 relative overflow-hidden bg-black/5">
+        <!-- Fading Spotlight Effect -->
+        <div class="fog-bg opacity-30"></div>
+        
+        <div class="max-w-4xl mx-auto text-center z-10 relative">
+            <!-- Closing Quote -->
+            <blockquote class="text-2xl italic mb-10 text-gray-300">
+                "Di batas antara ada dan tiada, kita temukan kembali air mata yang menjadi tanah."
+            </blockquote>
+
+            <!-- Contact Panel -->
+            <div class="glass-card p-6 inline-block">
+                <h3 class="text-xl mb-4 text-var(--color-silver)">Hubungi Kami</h3>
+                <div class="text-lg space-y-2 mb-6">
+                    <p>CP 1: +62 812-XXXX-XXXX (Rama)</p>
+                    <p>CP 2: +62 878-XXXX-XXXX (Sari)</p>
+                </div>
+
+                <!-- Social Media Icons (Hanya IG, TikTok, YouTube) - UPDATED -->
+                <div class="flex flex-col md:flex-row justify-center items-center space-y-4 md:space-y-0 md:space-x-8 mt-6">
+                    
+                    <!-- Instagram -->
+                    <a href="#" class="flex items-center space-x-2 text-lg text-var(--color-light-blue-1) hover:text-white transition duration-200" title="Instagram">
+                        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.48 0-4.5-2.02-4.5-4.5s2.02-4.5 4.5-4.5 4.5 2.02 4.5 4.5-2.02 4.5-4.5 4.5zM12 9c-1.657 0-3 1.343-3 3s1.343 3 3 3 3-1.343 3-3-1.343-3-3-3zM18.5 7c.828 0 1.5-.672 1.5-1.5S19.328 4 18.5 4 17 4.672 17 5.5s.672 1.5 1.5 1.5z"></path></svg>
+                        <span>@TeaterPutraBangsa</span>
+                    </a>
+                    
+                    <!-- TikTok -->
+                    <a href="#" class="flex items-center space-x-2 text-lg text-var(--color-light-blue-1) hover:text-white transition duration-200" title="TikTok">
+                        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v18h2V3h-2zM15 3v18h2V3h-2zM3 12h18M3 18h18M3 6h18"></path></svg>
+                        <span>@TDkebumenStage</span>
+                    </a>
+                    
+                    <!-- YouTube -->
+                    <a href="#" class="flex items-center space-x-2 text-lg text-var(--color-light-blue-1) hover:text-white transition duration-200" title="YouTube">
+                        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9l5 3-5 3V9zM21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        <span>Teater Putra Bangsa TV</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Elemen Utama
+            const welcomeScreen = document.getElementById('welcome-screen');
+            const enterBtn = document.getElementById('enter-btn');
+            const header = document.getElementById('main-header');
+            const homepage = document.getElementById('homepage');
+
+            // Kontrol Suara & Tema
+            const themeToggleBtn = document.getElementById('theme-toggle-btn');
+            const themeIcon = document.getElementById('theme-icon');
+            
+            let isLightMode = false; // Default is Dark Mode (Panggung Malam)
+            
+            // --- Fungsionalitas Theme Toggle (Cahaya Panggung) ---
+            const toggleTheme = () => {
+                isLightMode = !isLightMode;
+                if (isLightMode) {
+                    document.body.classList.add('light-mode');
+                    header.style.backgroundColor = 'rgba(216, 240, 255, 0.8)';
+                    header.style.color = 'var(--text-dark)';
+                    themeIcon.textContent = '🌙'; 
+                    themeToggleBtn.title = "Panggung Gelap";
+                } else {
+                    document.body.classList.remove('light-mode');
+                    header.style.backgroundColor = 'rgba(27, 27, 54, 0.8)';
+                    header.style.color = 'white';
+                    themeIcon.textContent = '🔆'; 
+                    themeToggleBtn.title = "Panggung Terang";
+                }
+            };
+
+            // --- Fungsionalitas Header Sticky ---
+            const toggleHeaderVisibility = () => {
+                if (window.scrollY > homepage.offsetHeight / 2) { 
+                    header.classList.add('visible');
+                } else {
+                    header.classList.remove('visible');
+                }
+            };
+
+            // --- Logika Halaman Sambutan (Login) dan Transisi INSTAN ---
+            enterBtn.addEventListener('click', () => {
+                // 1. Welcome Screen Fade Out
+                welcomeScreen.style.opacity = '0';
+                
+                // 2. Transisi INSTAN ke halaman utama
+                setTimeout(() => {
+                    welcomeScreen.style.display = 'none';
+                    document.body.style.overflowY = 'auto'; 
+                    
+                    // Inisiasi header setelah konten terlihat
+                    window.addEventListener('scroll', toggleHeaderVisibility);
+                    toggleHeaderVisibility(); 
+                    
+                }, 500); // Waktu transisi opacity welcome screen (minimalis)
+            });
+
+
+            // --- Event Listeners ---
+            
+            // Set initial height for homepage
+            homepage.style.height = window.innerHeight + 'px';
+            window.addEventListener('resize', () => {
+                homepage.style.height = window.innerHeight + 'px';
+            });
+            
+            // Handler Tombol Theme
+            themeToggleBtn.addEventListener('click', toggleTheme);
+            
+            // Atur konten utama agar terlihat penuh setelah welcome screen
+            const mainContent = document.getElementById('main-content');
+            mainContent.style.opacity = 1; 
+        });
+    </script>
+</body>
+</html>
